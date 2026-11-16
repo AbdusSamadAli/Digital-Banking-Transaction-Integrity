@@ -17,6 +17,9 @@ allure-report/
 # Local secrets / config
 .env
 
+# Local-only documents (project guide PDF)
+docs/
+
 # Editors and OS files
 .vscode/
 .idea/
