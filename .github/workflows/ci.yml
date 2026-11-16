@@ -1,0 +1,76 @@
+name: Banking Test Suite
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "30 2 * * *"   # nightly full regression
+  workflow_dispatch:
+
+jobs:
+  # Stage 1: fast API checks. If the backend contract is broken there is no point starting browsers.
+  api-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+      - run: pip install -r requirements.txt
+      - run: pytest -m api -n 2 --reruns 1 --reruns-delay 5
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: allure-results-api, path: reports/allure-results }
+
+  # Stage 2: UI + hybrid tests on Selenium Grid, browser matrix
+  ui-tests:
+    needs: api-tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chrome, firefox]
+    services:
+      selenium-hub:
+        image: selenium/hub:4.25.0
+        ports: ["4442:4442", "4443:4443", "4444:4444"]
+      node:
+        image: selenium/node-${{ matrix.browser }}:4.25.0
+        options: --shm-size=2gb
+        env:
+          SE_EVENT_BUS_HOST: selenium-hub
+          SE_EVENT_BUS_PUBLISH_PORT: "4442"
+          SE_EVENT_BUS_SUBSCRIBE_PORT: "4443"
+          SE_NODE_MAX_SESSIONS: "2"
+          SE_NODE_OVERRIDE_MAX_SESSIONS: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+      - run: pip install -r requirements.txt
+      - name: Wait for Grid
+        run: timeout 90 bash -c 'until curl -sf http://localhost:4444/status | grep -q "\"ready\": true"; do sleep 2; done'
+      - name: Run UI + hybrid tests (smoke on PR, full regression otherwise)
+        run: |
+          SCOPE=$([ "${{ github.event_name }}" = "pull_request" ] && echo "smoke and not api" || echo "not api")
+          pytest -m "$SCOPE" -n 2 --reruns 1 --reruns-delay 5 \
+                 --browser ${{ matrix.browser }} --grid-url http://localhost:4444
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: "allure-results-${{ matrix.browser }}", path: reports/allure-results }
+
+  report:
+    needs: [api-tests, ui-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { pattern: allure-results-*, merge-multiple: true, path: allure-results }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - name: Generate Allure HTML report
+        run: |
+          curl -sL https://github.com/allure-framework/allure2/releases/download/2.30.0/allure-2.30.0.tgz | tar -xz
+          ./allure-2.30.0/bin/allure generate allure-results -o allure-report --clean
+      - uses: actions/upload-artifact@v4
+        with: { name: allure-report, path: allure-report }

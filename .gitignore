@@ -1,0 +1,25 @@
+# Python cache / bytecode (in any folder)
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Test run output
+.pytest_cache/
+reports/
+allure-results/
+allure-report/
+*.log
+
+# Local secrets / config
+.env
+
+# Editors and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
